@@ -1,0 +1,27 @@
+{
+  "seed": 42,
+  "rows": 7043,
+  "train_rows": 5634,
+  "test_rows": 1409,
+  "train_churn_count": 1495,
+  "test_churn_count": 374,
+  "missing_total_charges": 11,
+  "cv_folds": 5,
+  "selection_metric": "mean training-fold average precision; F1 tie-break",
+  "data_sha256": "88be4b93fbe0cc83421af1c503794c97c342eca914c1576db7c276e61d61358a",
+  "train_index_sha256": "9060d3bbb66e745579f58db91b13205e134e6c25f8eb866af8c61c08d8401115",
+  "test_index_sha256": "aad552ce594bbb60508f760d867cb8ba0674861a958312d056654f49f5f3b8f0",
+  "python": "3.13.14",
+  "sklearn": "1.9.0",
+  "pandas": "3.0.3",
+  "numpy": "2.5.0",
+  "matplotlib": "3.11.0",
+  "checks": [
+    "unique customers",
+    "disjoint stratified train/test",
+    "disjoint CV folds within training",
+    "target and ID excluded",
+    "imputer fitted on training medians",
+    "scaler fitted on training rows only"
+  ]
+}
