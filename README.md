@@ -1,58 +1,81 @@
 # Telco Customer Churn Prediction
 
-## Problem Statement
-This project predicts whether a telecom customer will churn, so the business can identify at-risk customers and intervene before they leave.
+Compare classification models for identifying customers at risk of churn. This version corrects preprocessing leakage, adds stratified cross-validation and replaces the earlier evaluation results.
 
-## Dataset
-Telco Customer Churn dataset (Kaggle) — 7,043 customers, 21 original features, ~26% churn rate (imbalanced target).
+## Data
 
-## Approach
+The public Telco Customer Churn dataset contains 7,043 customers and a binary churn label. The CSV is included as `WA_Fn-UseC_-Telco-Customer-Churn.csv`. There are 11 blank `TotalCharges` values; these are converted to missing values and imputed using training-only medians. Customer IDs are unique and excluded from model features.
 
-1. Data Cleaning
-- Converted `TotalCharges` from text to numeric (it was silently stored as strings, including a small number of blank values)
-- Dropped `customerID` — a unique identifier with no predictive value
-- Checked for and confirmed no duplicate rows
+## Reproduce
 
-2. Feature Engineering
-- Mapped binary Yes/No columns (`Partner`, `Dependents`, `PhoneService`, `PaperlessBilling`, `gender`, `Churn`) to 1/0
-- One-hot encoded multi-category columns (`Contract`, `InternetService`, `PaymentMethod`, and all the service add-on columns) using `pd.get_dummies(drop_first=True)`
-- Scaled numeric columns (`tenure`, `MonthlyCharges`, `TotalCharges`) with `StandardScaler`
-- Final dataset: 30 fully numeric features
+Tested with Python 3.13.14. From this repository folder:
 
-3. Modeling
-Trained and compared three models, using an 80/20 train-test split:
-- Logistic Regression (baseline)
-- Random Forest (default settings)
-- Random Forest with `class_weight='balanced'`
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+python -m pip install -r requirements.txt
+python evaluate.py
+```
 
-## Results
+Or open `telco-customer-churn-prediction.ipynb` in Jupyter and run all cells. The notebook imports the readable implementation in `evaluate.py`; keep both files together. Saved outputs are included for readers who do not run Python.
 
-| Model | Accuracy | Churn Precision | Churn Recall | Missed Churners (False Negatives) |
-|---|---|---|---|---|
-| Logistic Regression | 78.8% | 0.62 | 0.52 | 181 |
-| Random Forest (default) | 78.7% | 0.63 | 0.47 | 198 |
-| Random Forest (balanced) | 75.3% | 0.53 | 0.61 | 146 |
+## Evaluation design
 
-Chosen model: Random Forest with `class_weight='balanced'`.
+1. Apply only stateless numeric parsing before splitting. Exclude customer ID and target from inputs.
+2. Reserve a stratified 20% holdout: 5,634 training customers and 1,409 test customers, including 374 test churners. Random seed is 42.
+3. Put imputation, scaling and categorical encoding inside each scikit-learn Pipeline. Fit them afresh on the training portion of every cross-validation fold. Unknown categories are handled without refitting on validation or test data.
+4. Compare a majority baseline, Logistic Regression, Random Forest and class-weighted Random Forest using five shuffled stratified folds on training data only.
+5. Choose the model with highest mean cross-validation average precision, using F1 to break ties. This ranking metric considers precision and recall across thresholds, without selecting an all-positive classifier simply for high recall. This rule is defined before holdout scoring.
+6. Fit the selected pipeline on all training data and evaluate it at the fixed 0.50 threshold on the holdout. Do not select models or thresholds using holdout performance.
 
-Accuracy alone is misleading on this dataset, since ~74% of customers don't churn — a model that just guessed "No" every time would already score ~74%. The metric that actually matters for this business problem is **recall on the churn class**: how many at-risk customers the model successfully flags. The balanced Random Forest catches 61% of actual churners (missing only 146 out of 374), a clear improvement over the baseline's 52% recall — at the cost of more false alarms (201 vs. 117). For a churn-prevention use case, that trade-off is worth it: the cost of missing a customer who leaves for good is typically much higher than the cost of a false-positive retention offer.
+### Training cross-validation
 
-## Key Insight
+Average precision is reported as mean +/- sample standard deviation across folds. Other columns are fold means at the model's default classification threshold. A fold standard deviation is not a confidence interval.
 
-The Random Forest's feature importances show that churn is driven primarily by billing and tenure patterns rather than demographics:
+| Model | Average precision | Precision | Recall | F1 |
+|---|---:|---:|---:|---:|
+| Majority baseline | 0.265 +/- 0.000 | 0.000 | 0.000 | 0.000 |
+| Logistic Regression | 0.661 +/- 0.021 | 0.655 | 0.544 | 0.594 |
+| Random Forest | 0.616 +/- 0.032 | 0.632 | 0.476 | 0.543 |
+| Balanced Random Forest | 0.622 +/- 0.032 | 0.581 | 0.647 | 0.612 |
 
-1. `TotalCharges`, `tenure`, and `MonthlyCharges` are by far the strongest predictors — customers who are newer and paying more are the highest churn risk.
-2. **Long-term contracts** (`Contract_Two year`) sharply reduce churn risk — customers locked into two-year contracts are far less likely to leave than month-to-month customers.
-3. Fiber optic internet and paying by electronic check are both associated with higher churn, hinting at either service satisfaction or billing friction issues worth investigating further.
-4. As a sanity check, `gender` — which shouldn't meaningfully affect churn — ranked lowest in importance, as expected.
+### Selected model holdout results
 
-**Business takeaway:** the highest-value retention targets are newer, high-paying, month-to-month customers on fiber internet. Incentivizing longer contract commitments for this group could meaningfully reduce churn.
+Selected model: **Logistic Regression**.
 
-## What I'd Do With More Time
-- Try gradient boosting models (XGBoost/LightGBM), which often outperform Random Forest on tabular data
-- Tune the classification threshold directly instead of relying only on `class_weight`, to fine-tune the precision/recall trade-off
-- Engineer additional features, such as a charges-per-tenure-month ratio
-- Use cross-validation instead of a single train/test split for more robust performance estimates
+| Metric | Value |
+|---|---:|
+| ROC AUC | 0.842 |
+| Average precision | 0.635 |
+| Churn precision | 65.7% |
+| Churn recall | 55.9% |
+| F1 | 0.604 |
+| Accuracy | 80.6% |
+| Correctly flagged churners | 209 |
+| Missed churners | 165 |
+| False alarms | 109 |
+| Correctly identified non-churners | 926 |
 
-## Tech Stack
-Python, pandas, scikit-learn, matplotlib
+![Holdout confusion matrix](results/confusion_matrix.png)
+
+The balanced Random Forest has higher training-CV recall but lower precision and average precision. Logistic Regression wins under the stated ranking criterion; it is not a claim that one model is best for every retention budget. At the fixed threshold, it misses 165 of 374 churners. Retention costs, contact capacity and intervention effectiveness were not supplied, so no savings or business impact is claimed. Threshold tuning is future work and must use training-only out-of-fold predictions or a separate validation set.
+
+## Verification and limitations
+
+- Assertions verify unique customers, disjoint train/test and CV partitions, training-only imputation statistics and training-only scaler statistics.
+- `results/cross_validation.csv`, `results/holdout_metrics.json` and `results/run_metadata.json` contain the detailed results, versions, seed and dataset hash.
+- The notebook and command-line script are executed locally. These are benchmark results, not production or external validation.
+- This public dataset was explored in the earlier project. The revised split is held out within this workflow, but is not a newly collected independent validation dataset.
+- The earlier 61% recall result is superseded. The split, missing-value treatment and preprocessing have changed, so this is not a controlled before/after comparison of model quality.
+- The dataset is a snapshot: no temporal validation or causal conclusions about retention interventions are supported.
+- This evaluation revision was prepared with AI assistance and executed locally; the original portfolio project remains the basis of the work.
+
+## Files
+
+- `evaluate.py`: data preparation, pipelines, cross-validation, selection, holdout evaluation and assertions.
+- `telco-customer-churn-prediction.ipynb`: explanation and executed results.
+- `requirements.txt`: pinned runtime versions used for this run.
+- `results/`: generated metrics and confusion matrix.
+
+Method reference: [scikit-learn guidance on data leakage and pipelines](https://scikit-learn.org/stable/common_pitfalls.html#data-leakage).
